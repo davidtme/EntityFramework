@@ -10,6 +10,7 @@ using System.Linq.Expressions;
 using System.Text;
 using JetBrains.Annotations;
 using Microsoft.Data.Entity.Relational.Query.Expressions;
+using Microsoft.Data.Entity.Relational.Query.ExpressionTreeVisitors;
 using Microsoft.Data.Entity.Utilities;
 using Remotion.Linq.Clauses;
 using Remotion.Linq.Parsing;
@@ -460,6 +461,12 @@ namespace Microsoft.Data.Entity.Relational.Query.Sql
                 using (_sql.Indent())
                 {
                     VisitExpression(caseExpression.When);
+                    if (caseExpression.When is ColumnExpression
+                        || caseExpression.When is ParameterExpression
+                        || caseExpression.When.IsAliasWithColumnExpression())
+                    {
+                        _sql.Append(" = 1");
+                    }
                 }
 
                 _sql.Append(") THEN CAST(1 AS BIT) ELSE CAST(0 AS BIT) END");
@@ -632,7 +639,7 @@ namespace Microsoft.Data.Entity.Relational.Query.Sql
                         return
                             binaryExpression.NodeType == ExpressionType.Equal
                                 ? (Expression)new IsNullExpression(columnExpression)
-                                : new IsNotNullExpression(columnExpression);
+                                : Expression.Not(new IsNullExpression(columnExpression));
                     }
                 }
             }
@@ -670,7 +677,7 @@ namespace Microsoft.Data.Entity.Relational.Query.Sql
             return aliasExpression;
         }
 
-        public virtual Expression VisitIsNullExpression(IsNullExpression isNullExpression)
+        public virtual Expression VisitIsNullExpression([NotNull] IsNullExpression isNullExpression)
         {
             Check.NotNull(isNullExpression, nameof(isNullExpression));
 
@@ -681,7 +688,7 @@ namespace Microsoft.Data.Entity.Relational.Query.Sql
             return isNullExpression;
         }
 
-        public virtual Expression VisitIsNotNullExpression(IsNotNullExpression isNotNullExpression)
+        public virtual Expression VisitIsNotNullExpression([NotNull] IsNullExpression isNotNullExpression)
         {
             Check.NotNull(isNotNullExpression, nameof(isNotNullExpression));
 
@@ -721,14 +728,19 @@ namespace Microsoft.Data.Entity.Relational.Query.Sql
             if (unaryExpression.NodeType == ExpressionType.Not)
             {
                 var inExpression = unaryExpression.Operand as InExpression;
-
                 if (inExpression != null)
                 {
                     return VisitNotInExpression(inExpression);
                 }
 
-                var isColumnOrParameterOperand =
-                    unaryExpression.Operand is ColumnExpression
+                var isNullExpression = unaryExpression.Operand as IsNullExpression;
+                if (isNullExpression != null)
+                {
+                    return VisitIsNotNullExpression(isNullExpression);
+                }
+
+                var isColumnOrParameterOperand = 
+                    unaryExpression.Operand is ColumnExpression 
                     || unaryExpression.Operand is ParameterExpression
                     || unaryExpression.Operand.IsAliasWithColumnExpression();
 
